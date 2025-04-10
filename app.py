@@ -1,40 +1,31 @@
 import streamlit as st
 import pandas as pd
 from random import sample
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-# Configurações do Streamlit
+# Configuração da interface
 st.set_page_config(page_title="Lotofácil IA - 8X", layout="centered")
 st.title("Gerador Inteligente de Jogos - Lotofácil 8X")
+st.caption("Desenvolvido por Marcel Melon - 8X Agro")
 
-# Função para carregar os dados dos concursos a partir de um arquivo Excel
+# Upload do arquivo Excel
+uploaded_file = st.file_uploader("Faça o upload do arquivo Excel com os resultados da Lotofácil (.xlsx)", type="xlsx")
+
 @st.cache_data
-def carregar_concursos_excel(uploaded_file):
-    # Lê o arquivo Excel carregado
-    df = pd.read_excel(uploaded_file, sheet_name="Resultados")
+def carregar_concursos_excel(file):
+    df = pd.read_excel(file, sheet_name="Resultados")
     
-    # Verifica se as colunas esperadas existem
-    if 'Concurso' in df.columns and 'Data' in df.columns and 'Dezenas' in df.columns:
-        # Limpeza dos dados: ajustando colunas
-        df['Dezenas'] = df['Dezenas'].apply(lambda x: [int(d) for d in str(x).split()])  # Converte as dezenas em lista de inteiros
-        return df
-    else:
-        st.error("O arquivo Excel não contém as colunas necessárias: Concurso, Data e Dezenas.")
-        return None
+    # Assume que as colunas de dezenas começam na coluna 'D1'
+    col_dezenas = [col for col in df.columns if str(col).startswith('D')]
+    df['Dezenas'] = df[col_dezenas].values.tolist()
+    
+    return df[['Concurso', 'Data', 'Dezenas']]
 
-# Carregar o arquivo Excel
-uploaded_file = st.file_uploader("Carregue o arquivo Excel com os resultados da Lotofácil", type=["xlsx"])
-
-# Se o usuário fizer o upload do arquivo
-if uploaded_file is not None:
-    df = carregar_concursos_excel(uploaded_file)
-
-    # Verifica se o DataFrame foi carregado corretamente
-    if df is not None:
-        st.success(f"Total de concursos carregados: {df.shape[0]}")
+if uploaded_file:
+    try:
+        df = carregar_concursos_excel(uploaded_file)
+        st.success(f"{df.shape[0]} concursos carregados com sucesso!")
         
-        # Estatísticas por LINHAS (1-5, 6-10, 11-15, 16-20, 21-25)
+        # --- Estatísticas por Linhas ---
         st.subheader("Estatísticas por Linhas (1–5, 6–10...)")
         linhas = {
             '1-5': list(range(1, 6)),
@@ -46,51 +37,37 @@ if uploaded_file is not None:
 
         contagem = {linha: [] for linha in linhas}
 
-        # Contagem de ocorrências das dezenas por linha
-        for index, row in df.iterrows():
-            dezenas = row['Dezenas']
+        for dezenas in df['Dezenas']:
             for nome, faixa in linhas.items():
                 contagem[nome].append(len([d for d in dezenas if d in faixa]))
 
         df_linhas = pd.DataFrame(contagem)
         st.bar_chart(df_linhas.mean())
+        
+        # --- Estatísticas de Frequência Geral ---
+        st.subheader("Frequência das Dezenas")
+        todas_dezenas = sum(df['Dezenas'], [])
+        freq = pd.Series(todas_dezenas).value_counts().sort_index()
+        st.bar_chart(freq)
 
-        # Geração de JOGOS
+        # --- Geração de Jogos ---
         st.subheader("Gerar Jogos Inteligentes")
         num_jogos = st.slider("Quantos jogos deseja gerar?", 1, 20, 5)
 
-        # Função para gerar um jogo aleatório
-        def gerar_jogo():
-            return sorted(sample(range(1, 26), 15))
+        def gerar_jogo_inteligente():
+            # Usa as 20 dezenas mais frequentes para montar o jogo
+            top_dezenas = freq.sort_values(ascending=False).head(20).index.tolist()
+            return sorted(sample(top_dezenas, 15))
 
-        # Função para gerar um jogo balanceado, com base nas estatísticas
-        def gerar_jogo_balanceado():
-            escolha_dezenas = []
-            for linha in linhas.values():
-                escolha_dezenas.extend(sorted(sample(linha, 3)))  # Seleciona 3 números de cada linha
-            return sorted(escolha_dezenas[:15])
-
-        # Geração dos jogos
-        jogos = [gerar_jogo() for _ in range(num_jogos)]  # Jogos aleatórios
-        jogos_balanceados = [gerar_jogo_balanceado() for _ in range(num_jogos)]  # Jogos balanceados
-        
-        df_jogos = pd.DataFrame(jogos)
-        df_jogos_balanceados = pd.DataFrame(jogos_balanceados)
-        
-        st.write("Jogos Aleatórios Gerados:")
+        jogos = [gerar_jogo_inteligente() for _ in range(num_jogos)]
+        df_jogos = pd.DataFrame(jogos, columns=[f"D{i+1}" for i in range(15)])
         st.dataframe(df_jogos)
-        
-        st.write("Jogos Balanceados Gerados:")
-        st.dataframe(df_jogos_balanceados)
 
-        # Botões para download dos jogos gerados
-        st.download_button("Baixar Jogos Aleatórios (.csv)", df_jogos.to_csv(index=False).encode(), file_name="jogos_aleatorios.csv")
-        st.download_button("Baixar Jogos Balanceados (.csv)", df_jogos_balanceados.to_csv(index=False).encode(), file_name="jogos_balanceados.csv")
+        st.download_button("Baixar Jogos (.csv)", df_jogos.to_csv(index=False).encode(), file_name="jogos_lotofacil.csv")
 
-    else:
-        st.error("Erro ao carregar os dados do arquivo Excel.")
+    except Exception as e:
+        st.error("Erro ao processar o arquivo. Verifique se a aba se chama 'Resultados' e se o formato está correto.")
+        st.exception(e)
+
 else:
-    st.info("Carregue um arquivo Excel contendo os resultados da Lotofácil para continuar.")
-
-# Footer
-st.caption("Powered by 8X Agro - Marcel Melon")
+    st.warning("Por favor, envie um arquivo Excel com os dados da Lotofácil para começar.")
