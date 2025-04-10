@@ -1,73 +1,81 @@
-import streamlit as st
-import pandas as pd
-from random import sample
+import streamlit as st import pandas as pd import numpy as np import requests from bs4 import BeautifulSoup from tensorflow.keras.models import Sequential from tensorflow.keras.layers import LSTM, Dense from sklearn.preprocessing import MinMaxScaler import io
 
-# Configuração da interface
-st.set_page_config(page_title="Lotofácil IA - 8X", layout="centered")
-st.title("Gerador Inteligente de Jogos - Lotofácil 8X")
-st.caption("Desenvolvido por Marcel Melon - 8X Agro")
+st.set_page_config(page_title="Lotofácil Inteligente 8X", layout="wide") st.title("Lotofácil Inteligente - Previsão com IA")
 
-# Upload do arquivo Excel
-uploaded_file = st.file_uploader("Faça o upload do arquivo Excel com os resultados da Lotofácil (.xlsx)", type="xlsx")
+Função para obter dados atualizados da Caixa
 
-@st.cache_data
-def carregar_concursos_excel(file):
-    df = pd.read_excel(file, sheet_name="Resultados")
-    
-    # Assume que as colunas de dezenas começam na coluna 'D1'
-    col_dezenas = [col for col in df.columns if str(col).startswith('D')]
-    df['Dezenas'] = df[col_dezenas].values.tolist()
-    
-    return df[['Concurso', 'Data', 'Dezenas']]
+def obter_resultados_lotofacil(): url = "https://loterias.caixa.gov.br/Paginas/Lotofacil.aspx" resposta = requests.get(url) soup = BeautifulSoup(resposta.content, 'html.parser')
 
-if uploaded_file:
+# Exemplo de scraping simples (a estrutura da página deve ser analisada com inspeção no navegador)
+resultados = soup.find_all("div", class_="resultado-loteria")
+if not resultados:
+    return pd.DataFrame()
+
+concursos = []
+for r in resultados:
     try:
-        df = carregar_concursos_excel(uploaded_file)
-        st.success(f"{df.shape[0]} concursos carregados com sucesso!")
-        
-        # --- Estatísticas por Linhas ---
-        st.subheader("Estatísticas por Linhas (1–5, 6–10...)")
-        linhas = {
-            '1-5': list(range(1, 6)),
-            '6-10': list(range(6, 11)),
-            '11-15': list(range(11, 16)),
-            '16-20': list(range(16, 21)),
-            '21-25': list(range(21, 26))
-        }
+        titulo = r.find("h2").text.strip()
+        numeros = r.find("ul").text.strip().split("\n")
+        concursos.append({
+            "Concurso": titulo,
+            "Dezenas": [int(n) for n in numeros if n.isdigit()]
+        })
+    except:
+        continue
+return pd.DataFrame(concursos)
 
-        contagem = {linha: [] for linha in linhas}
+Função para carregar o Excel personalizado
 
-        for dezenas in df['Dezenas']:
-            for nome, faixa in linhas.items():
-                contagem[nome].append(len([d for d in dezenas if d in faixa]))
+def carregar_concursos_excel(arquivo): df = pd.read_excel(arquivo) colunas_esperadas = ['Concurso', 'data sorteio'] + [f'd{i}' for i in range(1, 16)] + ['ganhadores'] if not all(col in df.columns for col in colunas_esperadas): st.error("O arquivo Excel não possui as colunas corretas. Verifique o padrão: Concurso, data sorteio, d1...d15, ganhadores") return None return df
 
-        df_linhas = pd.DataFrame(contagem)
-        st.bar_chart(df_linhas.mean())
-        
-        # --- Estatísticas de Frequência Geral ---
-        st.subheader("Frequência das Dezenas")
-        todas_dezenas = sum(df['Dezenas'], [])
-        freq = pd.Series(todas_dezenas).value_counts().sort_index()
-        st.bar_chart(freq)
+Função para preparar os dados para IA
 
-        # --- Geração de Jogos ---
-        st.subheader("Gerar Jogos Inteligentes")
-        num_jogos = st.slider("Quantos jogos deseja gerar?", 1, 20, 5)
+def preparar_dados(df): dados = df[[f'd{i}' for i in range(1, 16)]].values scaler = MinMaxScaler() dados_normalizados = scaler.fit_transform(dados)
 
-        def gerar_jogo_inteligente():
-            # Usa as 20 dezenas mais frequentes para montar o jogo
-            top_dezenas = freq.sort_values(ascending=False).head(20).index.tolist()
-            return sorted(sample(top_dezenas, 15))
+X = []
+y = []
+for i in range(1, len(dados_normalizados)):
+    X.append(dados_normalizados[i - 1])
+    y.append(dados_normalizados[i])
 
-        jogos = [gerar_jogo_inteligente() for _ in range(num_jogos)]
-        df_jogos = pd.DataFrame(jogos, columns=[f"D{i+1}" for i in range(15)])
-        st.dataframe(df_jogos)
+X = np.array(X).reshape((len(X), 1, 15))
+y = np.array(y)
+return X, y, scaler
 
-        st.download_button("Baixar Jogos (.csv)", df_jogos.to_csv(index=False).encode(), file_name="jogos_lotofacil.csv")
+Função para criar e treinar modelo LSTM
 
-    except Exception as e:
-        st.error("Erro ao processar o arquivo. Verifique se a aba se chama 'Resultados' e se o formato está correto.")
-        st.exception(e)
+def treinar_modelo(X, y): model = Sequential() model.add(LSTM(64, return_sequences=True, input_shape=(1, 15))) model.add(LSTM(32)) model.add(Dense(15)) model.compile(optimizer='adam', loss='mse') model.fit(X, y, epochs=100, batch_size=8, verbose=0) return model
 
-else:
-    st.warning("Por favor, envie um arquivo Excel com os dados da Lotofácil para começar.")
+Upload do arquivo Excel
+
+st.sidebar.header("Carregar Resultados da Lotofácil") uploaded_file = st.sidebar.file_uploader("Upload do Excel personalizado", type=[".xlsx"])
+
+Botão para carregar resultados do site
+
+if st.sidebar.button("Atualizar via Site da Caixa"): df_site = obter_resultados_lotofacil() if not df_site.empty: st.success("Resultados obtidos com sucesso!") st.dataframe(df_site.tail()) else: st.error("Falha ao obter resultados da Caixa. Tente novamente mais tarde.")
+
+Processamento do Excel e previsão
+
+if uploaded_file is not None: df = carregar_concursos_excel(uploaded_file) if df is not None: st.subheader("Resultados Carregados") st.dataframe(df.tail())
+
+st.subheader("Análise com IA")
+    X, y, scaler = preparar_dados(df)
+    model = treinar_modelo(X, y)
+
+    previsao_normalizada = model.predict(X[-1].reshape(1, 1, 15))
+    previsao_denormalizada = scaler.inverse_transform(previsao_normalizada)
+
+    sugestao = sorted([int(round(num)) for num in previsao_denormalizada[0]])
+    sugestao = [n if 1 <= n <= 25 else min(max(n, 1), 25) for n in sugestao]
+
+    st.markdown("### Sugestão de jogo com IA:")
+    st.write(sorted(set(sugestao)))
+
+    # Exibir gráfico de frequência
+    st.subheader("Estatísticas")
+    freq = pd.Series(df[[f'd{i}' for i in range(1, 15)]].values.ravel()).value_counts().sort_index()
+    st.bar_chart(freq)
+
+    st.success("Jogo sugerido gerado com sucesso com base em IA e histórico!")
+
+
