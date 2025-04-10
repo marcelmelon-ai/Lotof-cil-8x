@@ -1,6 +1,15 @@
-app.py
-
-import streamlit as st import pandas as pd import numpy as np import requests import io import re from bs4 import BeautifulSoup from datetime import datetime from sklearn.ensemble import RandomForestClassifier from sklearn.model_selection import train_test_split from sklearn.metrics import accuracy_score from sklearn.preprocessing import MultiLabelBinarizer
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+import io
+import re
+from bs4 import BeautifulSoup
+from datetime import datetime
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import MultiLabelBinarizer
 
 Configurações iniciais
 
