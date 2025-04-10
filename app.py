@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import MultiLabelBinarizer
 
-Configurações iniciais
+# Configurações iniciais
 
 df = None st.set_page_config(page_title="Lotofácil IA - 8X", layout="centered") st.title("Gerador Inteligente de Jogos - Lotofácil 8X")
 
