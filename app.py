@@ -1,81 +1,94 @@
-import streamlit as st import pandas as pd import numpy as np import requests from bs4 import BeautifulSoup from tensorflow.keras.models import Sequential from tensorflow.keras.layers import LSTM, Dense from sklearn.preprocessing import MinMaxScaler import io
+app.py
 
-st.set_page_config(page_title="Lotofácil Inteligente 8X", layout="wide") st.title("Lotofácil Inteligente - Previsão com IA")
+import streamlit as st import pandas as pd import numpy as np import requests import io import re from bs4 import BeautifulSoup from datetime import datetime from sklearn.ensemble import RandomForestClassifier from sklearn.model_selection import train_test_split from sklearn.metrics import accuracy_score from sklearn.preprocessing import MultiLabelBinarizer
 
-Função para obter dados atualizados da Caixa
+Configurações iniciais
 
-def obter_resultados_lotofacil(): url = "https://loterias.caixa.gov.br/Paginas/Lotofacil.aspx" resposta = requests.get(url) soup = BeautifulSoup(resposta.content, 'html.parser')
+df = None st.set_page_config(page_title="Lotofácil IA - 8X", layout="centered") st.title("Gerador Inteligente de Jogos - Lotofácil 8X")
 
-# Exemplo de scraping simples (a estrutura da página deve ser analisada com inspeção no navegador)
-resultados = soup.find_all("div", class_="resultado-loteria")
-if not resultados:
-    return pd.DataFrame()
+Função para buscar os resultados atualizados da Caixa
 
+def baixar_dados_caixa(): url = 'https://loterias.caixa.gov.br/Paginas/Lotofacil.aspx' response = requests.get(url) soup = BeautifulSoup(response.text, 'html.parser') scripts = soup.find_all("script")
+
+for script in scripts:
+    if 'var resultados' in script.text:
+        resultados_texto = script.text
+        break
+else:
+    return None
+
+matches = re.findall(r'"concurso":(\d+),"dataApuracao":"(\d+/\d+/\d+)","dezenasSorteadasOrdemSorteio":([\d,"]+)', resultados_texto)
 concursos = []
-for r in resultados:
-    try:
-        titulo = r.find("h2").text.strip()
-        numeros = r.find("ul").text.strip().split("\n")
-        concursos.append({
-            "Concurso": titulo,
-            "Dezenas": [int(n) for n in numeros if n.isdigit()]
-        })
-    except:
-        continue
-return pd.DataFrame(concursos)
+for concurso, data, dezenas in matches:
+    dezenas = list(map(int, re.findall(r'\d+', dezenas)))
+    concursos.append([int(concurso), data, dezenas])
 
-Função para carregar o Excel personalizado
+df = pd.DataFrame(concursos, columns=['Concurso', 'Data', 'Dezenas'])
+return df
 
-def carregar_concursos_excel(arquivo): df = pd.read_excel(arquivo) colunas_esperadas = ['Concurso', 'data sorteio'] + [f'd{i}' for i in range(1, 16)] + ['ganhadores'] if not all(col in df.columns for col in colunas_esperadas): st.error("O arquivo Excel não possui as colunas corretas. Verifique o padrão: Concurso, data sorteio, d1...d15, ganhadores") return None return df
+Função alternativa para carregar Excel do usuário
 
-Função para preparar os dados para IA
+@st.cache_data def carregar_concursos_excel(arquivo): df = pd.read_excel(arquivo) colunas = [col.lower().strip() for col in df.columns] dezenas_cols = [col for col in colunas if col.startswith("d") and col[1:].isdigit()] dezenas = df[[c for c in df.columns if c.lower() in dezenas_cols]].values.tolist() df_final = pd.DataFrame({ 'Concurso': df[df.columns[0]], 'Data': pd.to_datetime(df[df.columns[1]], errors='coerce'), 'Dezenas': dezenas }) return df_final
 
-def preparar_dados(df): dados = df[[f'd{i}' for i in range(1, 16)]].values scaler = MinMaxScaler() dados_normalizados = scaler.fit_transform(dados)
+Seção para upload ou atualização dos dados
 
+opcao_dados = st.radio("Escolha a origem dos dados:", ("Atualizar via site da Caixa", "Carregar arquivo Excel"))
+
+if opcao_dados == "Atualizar via site da Caixa": df = baixar_dados_caixa() else: uploaded_file = st.file_uploader("Envie o arquivo Excel com os resultados", type=[".xlsx"]) if uploaded_file: df = carregar_concursos_excel(uploaded_file)
+
+if df is not None: st.success(f"Concursos carregados: {df.shape[0]}")
+
+# Estatísticas por Linhas
+st.subheader("Estatísticas por Linhas (1–5, 6–10...)")
+linhas = {
+    '1-5': list(range(1, 6)),
+    '6-10': list(range(6, 11)),
+    '11-15': list(range(11, 16)),
+    '16-20': list(range(16, 21)),
+    '21-25': list(range(21, 26))
+}
+contagem = {linha: [] for linha in linhas}
+for dezenas in df['Dezenas']:
+    for nome, faixa in linhas.items():
+        contagem[nome].append(len([d for d in dezenas if d in faixa]))
+
+df_linhas = pd.DataFrame(contagem)
+st.bar_chart(df_linhas.mean())
+
+# Redes neurais e IA para sugestão
+st.subheader("Previsão Inteligente com IA")
+mlb = MultiLabelBinarizer(classes=list(range(1, 26)))
+y = mlb.fit_transform(df['Dezenas'])
 X = []
-y = []
-for i in range(1, len(dados_normalizados)):
-    X.append(dados_normalizados[i - 1])
-    y.append(dados_normalizados[i])
+for i in range(len(y) - 1):
+    X.append(y[i])
+y_train = y[1:]
 
-X = np.array(X).reshape((len(X), 1, 15))
-y = np.array(y)
-return X, y, scaler
+X_train, X_test, y_train, y_test = train_test_split(X, y_train, test_size=0.2, random_state=42)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
 
-Função para criar e treinar modelo LSTM
+y_pred = model.predict(X_test)
+acc = accuracy_score(np.array(y_test).argmax(axis=1), y_pred.argmax(axis=1))
+st.info(f"Acurácia da IA: {acc:.2f}")
 
-def treinar_modelo(X, y): model = Sequential() model.add(LSTM(64, return_sequences=True, input_shape=(1, 15))) model.add(LSTM(32)) model.add(Dense(15)) model.compile(optimizer='adam', loss='mse') model.fit(X, y, epochs=100, batch_size=8, verbose=0) return model
+pred_prox = model.predict([y[-1]])[0]
+dezenas_previstas = [i+1 for i, val in enumerate(pred_prox) if val == 1][:15]
+st.success(f"Sugestão inteligente para o próximo concurso: {sorted(dezenas_previstas)}")
 
-Upload do arquivo Excel
+# Geração de Jogos Aleatórios
+st.subheader("Gerador de Jogos Aleatórios")
+num_jogos = st.slider("Número de jogos a gerar:", 1, 20, 5)
+def gerar_jogo():
+    return sorted(np.random.choice(range(1, 26), 15, replace=False))
 
-st.sidebar.header("Carregar Resultados da Lotofácil") uploaded_file = st.sidebar.file_uploader("Upload do Excel personalizado", type=[".xlsx"])
+jogos = [gerar_jogo() for _ in range(num_jogos)]
+df_jogos = pd.DataFrame(jogos)
+st.dataframe(df_jogos)
+st.download_button("Baixar Jogos (.csv)", df_jogos.to_csv(index=False).encode(), file_name="jogos_lotofacil.csv")
 
-Botão para carregar resultados do site
+else: st.error("Erro ao carregar os dados. Verifique se o arquivo ou a fonte está correta.")
 
-if st.sidebar.button("Atualizar via Site da Caixa"): df_site = obter_resultados_lotofacil() if not df_site.empty: st.success("Resultados obtidos com sucesso!") st.dataframe(df_site.tail()) else: st.error("Falha ao obter resultados da Caixa. Tente novamente mais tarde.")
+st.caption("Desenvolvido por 8X Agro - Marcel Melon")
 
-Processamento do Excel e previsão
-
-if uploaded_file is not None: df = carregar_concursos_excel(uploaded_file) if df is not None: st.subheader("Resultados Carregados") st.dataframe(df.tail())
-
-st.subheader("Análise com IA")
-    X, y, scaler = preparar_dados(df)
-    model = treinar_modelo(X, y)
-
-    previsao_normalizada = model.predict(X[-1].reshape(1, 1, 15))
-    previsao_denormalizada = scaler.inverse_transform(previsao_normalizada)
-
-    sugestao = sorted([int(round(num)) for num in previsao_denormalizada[0]])
-    sugestao = [n if 1 <= n <= 25 else min(max(n, 1), 25) for n in sugestao]
-
-    st.markdown("### Sugestão de jogo com IA:")
-    st.write(sorted(set(sugestao)))
-
-    # Exibir gráfico de frequência
-    st.subheader("Estatísticas")
-    freq = pd.Series(df[[f'd{i}' for i in range(1, 15)]].values.ravel()).value_counts().sort_index()
-    st.bar_chart(freq)
-
-    st.success("Jogo sugerido gerado com sucesso com base em IA e histórico!")
-
-
+                                   
